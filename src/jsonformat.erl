@@ -44,7 +44,7 @@ format(#{msg:={report, #{format:=Format, args:=Args, label:={error_logger, _}}}}
   Report = #{text => io_lib:format(Format, Args)},
   format(Map#{msg := {report, Report}}, Config);
 format(#{level:=Level, msg:={report, Msg}, meta:=Meta}, Config) when is_map(Msg) ->
-  Data0 = merge_meta(Msg, Meta#{level => Level}, Config),
+  Data0 = merge_meta_first(Msg, Meta#{level => Level}, Config),
   Data1 = apply_key_mapping(Data0, Config),
   Data2 = apply_format_funs(Data1, Config),
   encode(pre_encode(Data2, Config), Config);
@@ -87,6 +87,12 @@ merge_meta(Msg, Meta0, Config) ->
   Meta2 = meta_with(Meta1, Config),
   maps:merge(Msg, Meta2).
 
+%% Puts meta followed by message
+merge_meta_first(Msg, Meta0, Config) ->
+  Meta1 = meta_without(Meta0, Config),
+  Meta2 = meta_with(Meta1, Config),
+  maps:merge(Meta2, Msg).
+
 encode(Data, Config) ->
   Json = jsx:encode(Data),
   case new_line(Config) of
@@ -122,7 +128,7 @@ apply_format_funs(Data, _) ->
   Data.
 
 apply_key_mapping(Data, #{key_mapping := Mapping}) ->
-  DataOnlyMapped = 
+  DataOnlyMapped =
     maps:fold(fun(K, V, Acc) when is_map_key(K, Data) -> Acc#{V => maps:get(K, Data)};
                  (_, _, Acc)                          -> Acc
               end, #{}, Mapping),
