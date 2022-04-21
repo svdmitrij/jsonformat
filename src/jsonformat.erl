@@ -28,9 +28,9 @@
 
 %%%_* Types ============================================================
 -type config() :: #{new_line => boolean()
-, key_mapping => #{atom() => atom()}
-, format_funs => #{atom() => fun((_) -> _)}
-, chars_limit => non_neg_integer()}.
+                  , key_mapping => #{atom() => atom()}
+                  , format_funs => #{atom() => fun((_) -> _)}
+                  , chars_limit => non_neg_integer()}.
 
 -export_type([config/0]).
 
@@ -45,10 +45,11 @@ format(#{msg := {report, #{format := Format, args := Args, label := {error_logge
     Report = #{text => io_lib:format(Format, Args, chars_limit(Config))},
     format(Map#{msg := {report, Report}}, Config);
 format(#{level := Level, msg := {report, Msg}, meta := Meta}, Config) when is_map(Msg) ->
-    Data0 = Msg,
-    Data1 = apply_key_mapping(Data0, Config),
+    Data1 = apply_key_mapping(Msg, Config),
     Data2 = apply_format_funs(Data1, Config),
-    Meta1 = apply_key_mapping(Meta#{level => Level}, Config),
+    Meta0 = meta_without(Meta#{level => Level}, Config),
+    Meta1 = meta_with(Meta0, Config),
+    Meta1 = apply_key_mapping(Meta1, Config),
     Meta2 = apply_format_funs(Meta1, Config),
     encode(#{report => [pre_encode(Meta2, Config), pre_encode(Data2, Config)]}, Config);
 format(Map = #{msg := {report, KeyVal}}, Config) when is_list(KeyVal) ->
@@ -149,21 +150,21 @@ meta_with(Meta, _ConfigNotPresent) ->
 
 %%noinspection ErlangUnresolvedMacros
 format_test() ->
-    ?assertEqual(<<"{\"level\":\"alert\",\"text\":\"derp\"}">>
+    ?assertEqual(<<"{\"report\":[{\"level\":\"alert\"},{\"text\":\"derp\"}]}">>
         , format(#{level => alert, msg => {string, "derp"}, meta => #{}}, #{})),
-    ?assertEqual(<<"{\"herp\":\"derp\",\"level\":\"alert\"}">>
+    ?assertEqual(<<"{\"report\":[{\"level\":\"alert\"},{\"herp\":\"derp\"}]}">>
         , format(#{level => alert, msg => {report, #{herp => derp}}, meta => #{}}, #{})).
 
 %%noinspection ErlangUnresolvedMacros
 format_funs_test() ->
     Config1 = #{format_funs => #{time => fun(Epoch) -> Epoch + 1 end
         , level => fun(alert) -> info end}},
-    ?assertEqual(<<"{\"level\":\"info\",\"text\":\"derp\",\"time\":2}">>
+    ?assertEqual(<<"{\"report\":[{\"level\":\"info\",\"time\":2},{\"text\":\"derp\"}]}">>
         , format(#{level => alert, msg => {string, "derp"}, meta => #{time => 1}}, Config1)),
 
     Config2 = #{format_funs => #{time => fun(Epoch) -> Epoch + 1 end
         , foobar => fun(alert) -> info end}},
-    ?assertEqual(<<"{\"level\":\"alert\",\"text\":\"derp\",\"time\":2}">>
+    ?assertEqual(<<"{\"report\":[{\"level\":\"alert\",\"time\":2},{\"text\":\"derp\"}]}">>
         , format(#{level => alert, msg => {string, "derp"}, meta => #{time => 1}}, Config2)).
 
 %%noinspection ErlangUnresolvedMacros
@@ -194,7 +195,7 @@ list_format_test() ->
         #{level => error,
             meta => #{time => 1},
             msg => {report, #{report => [{hej, "hopp"}]}}},
-    ?assertEqual(<<"{\"level\":\"error\",\"report\":\"[{hej,\\\"hopp\\\"}]\",\"time\":1}">>
+    ?assertEqual(<<"{\"report\":[{\"level\":\"error\",\"time\":1},{\"report\":\"[{hej,\\\"hopp\\\"}]\"}]}">>
         , format(ErrorReport, #{})).
 
 %%noinspection ErlangUnresolvedMacros
@@ -202,15 +203,13 @@ meta_without_test() ->
     Error = #{level => info
         , msg => {report, #{answer => 42}}
         , meta => #{secret => xyz}},
-    ?assertEqual([{<<"answer">>, 42}
-        , {<<"level">>, <<"info">>}
-        , {<<"secret">>, <<"xyz">>}
-    ],
+    ?assertEqual([{<<"report">>,
+        [[{<<"level">>,<<"info">>},{<<"secret">>,<<"xyz">>}],
+            [{<<"answer">>,42}]]}],
         jsx:decode(format(Error, #{}))),
     Config2 = #{meta_without => [secret]},
-    ?assertEqual([{<<"answer">>, 42}
-        , {<<"level">>, <<"info">>}
-    ],
+    ?assertEqual([{<<"report">>,
+        [[{<<"level">>,<<"info">>}],[{<<"answer">>,42}]]}],
         jsx:decode(format(Error, Config2))),
     ok.
 
@@ -219,15 +218,13 @@ meta_with_test() ->
     Error = #{level => info
         , msg => {report, #{answer => 42}}
         , meta => #{secret => xyz}},
-    ?assertEqual([{<<"answer">>, 42}
-        , {<<"level">>, <<"info">>}
-        , {<<"secret">>, <<"xyz">>}
-    ],
+    ?assertEqual([{<<"report">>,
+        [[{<<"level">>,<<"info">>},{<<"secret">>,<<"xyz">>}],
+            [{<<"answer">>,42}]]}],
         jsx:decode(format(Error, #{}))),
     Config2 = #{meta_with => [level]},
-    ?assertEqual([{<<"answer">>, 42}
-        , {<<"level">>, <<"info">>}
-    ],
+    ?assertEqual([{<<"report">>,
+        [[{<<"level">>,<<"info">>}],[{<<"answer">>,42}]]}],
         jsx:decode(format(Error, Config2))),
     ok.
 
