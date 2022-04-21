@@ -47,7 +47,7 @@ format(#{level:=Level, msg:={report, Msg}, meta:=Meta}, Config) when is_map(Msg)
   Data0 = Msg, %%merge_meta_first(Msg, Meta#{level => Level}, Config),
   Data1 = apply_key_mapping(Data0, Config),
   Data2 = apply_format_funs(Data1, Config),
-  encode([Meta#{level => Level}, pre_encode(Data2, Config)], Config);
+  encode(#{report => [pre_encode(Meta#{level => Level}, Config), pre_encode(Data2, Config)]}, Config);
 format(Map = #{msg := {report, KeyVal}}, Config) when is_list(KeyVal) ->
   format(Map#{msg := {report, maps:from_list(KeyVal)}}, Config);
 format(Map = #{msg := {string, String}}, Config) ->
