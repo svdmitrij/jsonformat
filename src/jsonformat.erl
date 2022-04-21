@@ -29,7 +29,8 @@
 %%%_* Types ============================================================
 -type config() :: #{ new_line => boolean()
                    , key_mapping => #{atom() => atom()}
-                   , format_funs => #{atom() => fun((_) -> _)}}.
+                   , format_funs => #{atom() => fun((_) -> _)}
+                   , chars_limit => non_neg_integer()}.
 
 -export_type([config/0]).
 
@@ -41,10 +42,10 @@
 %%%_ * API -------------------------------------------------------------
 -spec format(logger:log_event(), config()) -> unicode:chardata().
 format(#{msg:={report, #{format:=Format, args:=Args, label:={error_logger, _}}}} = Map, Config) ->
-  Report = #{text => io_lib:format(Format, Args)},
+  Report = #{text => io_lib:format(Format, Args, chars_limit(Config))},
   format(Map#{msg := {report, Report}}, Config);
 format(#{level:=Level, msg:={report, Msg}, meta:=Meta}, Config) when is_map(Msg) ->
-  Data0 = Msg, %%merge_meta_first(Msg, Meta#{level => Level}, Config),
+  Data0 = Msg,
   Data1 = apply_key_mapping(Data0, Config),
   Data2 = apply_format_funs(Data1, Config),
   encode(#{report => [pre_encode(Meta#{level => Level}, Config), pre_encode(Data2, Config)]}, Config);
@@ -54,7 +55,10 @@ format(Map = #{msg := {string, String}}, Config) ->
   Report = #{text => unicode:characters_to_binary(String)},
   format(Map#{msg := {report, Report}}, Config);
 format(Map = #{msg := {Format, Terms}}, Config) ->
-  format(Map#{msg := {string, io_lib:format(Format, Terms)}}, Config).
+  format(Map#{msg := {string, io_lib:format(Format, Terms, chars_limit(Config))}}, Config).
+
+chars_limit(Config) ->
+    [{chars_limit, maps:get(chars_limit, Config, -1)}].
 
 %%% Useful for converting logger:timestamp() to a readable timestamp.
 -spec system_time_to_iso8601(integer()) -> binary().
@@ -73,25 +77,14 @@ system_time_to_iso8601(Epoch, Unit) ->
 pre_encode(Data, Config) ->
   maps:fold(
     fun(K, V, Acc) when is_map(V) ->
-      maps:put(jsonify(K), pre_encode(V, Config), Acc);
+      maps:put(jsonify(K, Config), pre_encode(V, Config), Acc);
        (K, Vs, Acc) when is_list(Vs), is_map(hd(Vs)) -> % assume list of maps
-      maps:put(jsonify(K), [pre_encode(V, Config) || V <- Vs, is_map(V)], Acc);
+      maps:put(jsonify(K, Config), [pre_encode(V, Config) || V <- Vs, is_map(V)], Acc);
        (K, V, Acc) ->
-      maps:put(jsonify(K), jsonify(V), Acc)
+      maps:put(jsonify(K, Config), jsonify(V, Config), Acc)
     end,
     maps:new(),
     Data).
-
-merge_meta(Msg, Meta0, Config) ->
-  Meta1 = meta_without(Meta0, Config),
-  Meta2 = meta_with(Meta1, Config),
-  maps:merge(Msg, Meta2).
-
-%% Puts meta followed by message
-merge_meta_first(Msg, Meta0, Config) ->
-  Meta1 = meta_without(Meta0, Config),
-  Meta2 = meta_with(Meta1, Config),
-  maps:merge(Meta2, Msg).
 
 encode(Data, Config) ->
   Json = jsx:encode(Data),
@@ -100,23 +93,23 @@ encode(Data, Config) ->
     false -> Json
   end.
 
-jsonify(A) when is_atom(A)     -> A;
-jsonify(B) when is_binary(B)   -> B;
-jsonify(I) when is_integer(I)  -> I;
-jsonify(F) when is_float(F)    -> F;
-jsonify(B) when is_boolean(B)  -> B;
-jsonify(P) when is_pid(P)      -> jsonify(pid_to_list(P));
-jsonify(P) when is_port(P)     -> jsonify(port_to_list(P));
-jsonify(F) when is_function(F) -> jsonify(erlang:fun_to_list(F));
-jsonify(L) when is_list(L)     ->
+jsonify(A, _Config) when is_atom(A)     -> A;
+jsonify(B, _Config) when is_binary(B)   -> B;
+jsonify(I, _Config) when is_integer(I)  -> I;
+jsonify(F, _Config) when is_float(F)    -> F;
+jsonify(B, _Config) when is_boolean(B)  -> B;
+jsonify(P, Config) when is_pid(P)      -> jsonify(pid_to_list(P), Config);
+jsonify(P, Config) when is_port(P)     -> jsonify(port_to_list(P), Config);
+jsonify(F, Config) when is_function(F) -> jsonify(erlang:fun_to_list(F), Config);
+jsonify(L, Config) when is_list(L)     ->
   try list_to_binary(L) of
     S -> S
   catch error:badarg ->
-    unicode:characters_to_binary(io_lib:format("~0p", [L]))
+    unicode:characters_to_binary(io_lib:format("~0p", [L], chars_limit(Config)))
   end;
-jsonify({M, F, A}) when is_atom(M), is_atom(F), is_integer(A) ->
+jsonify({M, F, A}, _Config) when is_atom(M), is_atom(F), is_integer(A) ->
   <<(a2b(M))/binary,$:,(a2b(F))/binary,$/,(integer_to_binary(A))/binary>>;
-jsonify(Any)                   -> unicode:characters_to_binary(io_lib:format("~0p", [Any])).
+jsonify(Any, Config)                   -> unicode:characters_to_binary(io_lib:format("~0p", [Any], chars_limit(Config))).
 
 a2b(A) -> atom_to_binary(A, utf8).
 
